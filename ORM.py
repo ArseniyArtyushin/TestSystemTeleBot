@@ -3,6 +3,8 @@ from data.test_list import TestList
 from data.question_list import QuestionList
 import os
 
+if not os.path.exists('db/'):
+    os.mkdir('./db')
 db_session.global_init("db/main.db")
 
 

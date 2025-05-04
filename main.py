@@ -51,14 +51,15 @@ async def help_command(message: Message):
     await message.reply("Для начала работы, в выпадающей клавиатуре необходимо выбрать одну из двух команд: /admin или "
                         "/start_test\n1) Режим /admin:\n    В данном режиме Вы можете создать тест или посмотреть "
                         "результаты тех, кто его уже прошел. При выборе режима создания теста, его ID определится "
-                        "самостоятельно, Вам нужно будет лишь придумать пароль, чтобы в дальнейшем используя ID и "
-                        "пароль можно было посмотреть результаты тестируемых. Далее нужно выбрать, что Вы хотите "
+                        "самостоятельно, Вам нужно будет лишь придумать имя и пароль, чтобы в дальнейшем используя ID и"
+                        " пароль можно было посмотреть результаты тестируемых. Далее нужно выбрать, что Вы хотите "
                         "создать: тест или опрос? Разница в том, что тест подразумевает заведомо правильный(ые) "
                         "ответ(ы) и в результатах помимо самих ответов, будет указываться количество правильных ответов"
                         " тестируемого. В опросе же не подразумевается заведомо правильных ответов и можно посмотреть"
                         " только выбранный ответ. Затем Вы сможете создавать вопросы, добавляя текст, варианты ответа"
                         " и, при желании, медиафайлы. Когда Вы закончите создавать вопросы, нужно будет написать "
-                        "команду /stop и завершить создание теста.\n    В режиме просмотра результатов у Вас будет "
+                        "команду выбрать соответствующую кнопку на выпадающей клавиатуре и завершить создание теста.\n "
+                        "   В режиме просмотра результатов у Вас будет "
                         "выбор из пользователей, прошедших тестирование. Нажав на конкретного, Вы получите сообщение с"
                         " его результатами.\n2) Режим /start_test:\n    Этот режим подразумевает, что кто-то уже создал"
                         " тест и поделился с Вами его ID для прохождения. Для начала нужно ввести ID теста и свое имя."
@@ -137,7 +138,7 @@ async def password_creating(message: Message, state: FSMContext):
                          f'после этого поставить символ ^^, показывающий, что текст вопроса закончился и далее пойдут '
                          f'варианты ответа. Потом перечисляете варианты ответа, разделяя их знаком ; .Если в данном '
                          f'вопросе требуется вписать ответ, а не выбрать, то вместо вариантов ответа нужно поставить '
-                         f'--  . {test_text if data["test_or_not"] == "тест" else ""} При желании, можно добавить к '
+                         f'-  . {test_text if data["test_or_not"] == "тест" else ""} При желании, можно добавить к '
                          f'вопросу фотографию. Когда Вы закончите, просто отправьте это сообщение. Бот же отправит '
                          f'то, как этот вопрос будет выглядеть у человека, проходящего этот {data["test_or_not"]}. Если'
                          f' все устраивает, просто отправляйте следующий вопрос, если же нет, то можете '
@@ -163,11 +164,12 @@ async def question_add(message: Message, state: FSMContext):
     elif message.text == 'Завершить добавление вопросов':
         current_data = await state.get_data()
         await state.clear()
-        if current_data['questions']:
-            await message.answer('Создание теста завершено, вопросы сохранены.', reply_markup=keyboard)
+        if questions:
+            await message.answer(f'Создание {current_data["test_or_not"]}а завершено, вопросы сохранены.',
+                                 reply_markup=keyboard)
             create_test(current_data)
         else:
-            await message.answer('Создание теста отменено.', reply_markup=keyboard)
+            await message.answer(f'Создание {current_data["test_or_not"]}а отменено.', reply_markup=keyboard)
     else:
         file_id = str(message.photo[-1]).split()[0].split("'")[1] if message.photo else ''
         text = message.text if message.text else message.caption if message.caption else ''
@@ -176,11 +178,14 @@ async def question_add(message: Message, state: FSMContext):
             text.split('^^')) > 1 else []
         correct_variants = text.split('^^')[2].split(';') \
             if test_or_not == 'тест' and len(text.split('^^')) == 3 else []
-        if len(correct_variants) == 1 and (not correct_variants[0]) and test_or_not == 'тест':
+        variants = list(filter(lambda x: x, variants))
+        correct_variants = list(filter(lambda x: x, correct_variants))
+        if (test_or_not == 'тест' and
+                ((len(correct_variants) == 1 and (not correct_variants[0])) or not correct_variants)):
             await message.answer('В режиме создания теста необходимо указать правильный вариант ответа.')
         elif not question_text:
             await message.answer('Пожалуйста, напишите текст вопроса.')
-        elif len(variants) == 1 and variants[0] != '--':
+        elif len(variants) == 1 and variants[0] != '-':
             await message.answer('Пожалуйста, укажите больше одного варианта ответа.')
         elif file_id:
             if len(variants) > 1:
