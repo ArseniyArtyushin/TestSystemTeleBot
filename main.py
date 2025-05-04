@@ -7,6 +7,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
 from pyexpat.errors import messages
+from ORM import *
 import random
 
 from config import BOT_TOKEN
@@ -94,15 +95,19 @@ async def process_callback_create_test(callback: CallbackQuery, state: FSMContex
 async def process_callback_create_test(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     test_id = random.randint(111111, 999999)
+    while check_test_id(test_id):
+        test_id = random.randint(111111, 999999)
     await state.update_data(test_or_not='тест', ID=test_id)
     await state.set_state(TestCreating.name)
-    await callback.message.answer('Введите название для Вашего теста.')
+    await callback.message.answer('Введите название для Вашего теста.', reply_markup=ReplyKeyboardRemove())
 
 
 @dp.callback_query(F.data == 'not_test', TestCreating.test_or_not)
 async def process_callback_create_test(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     test_id = random.randint(111111, 999999)
+    while check_test_id(test_id):
+        test_id = random.randint(111111, 999999)
     await state.update_data(test_or_not='опрос', ID=test_id)
     await state.set_state(TestCreating.name)
     await callback.message.answer('Введите название для Вашего опроса.')
@@ -118,6 +123,8 @@ async def name_creating(message: Message, state: FSMContext):
 
 @dp.message(TestCreating.password)
 async def password_creating(message: Message, state: FSMContext):
+    reply_keyboard = [[KeyboardButton(text='Удалить вопрос'), KeyboardButton(text='Завершить добавление вопросов')]]
+    keyboard = ReplyKeyboardMarkup(keyboard=reply_keyboard, resize_keyboard=True, one_time_keyboard=False)
     password = message.text
     data = await state.get_data()
     test_text = ('После того, как Вы указали все варианты ответа, опять поставьте ^^ и '
@@ -133,34 +140,48 @@ async def password_creating(message: Message, state: FSMContext):
                          f'--  . {test_text if data["test_or_not"] == "тест" else ""} При желании, можно добавить к '
                          f'вопросу фотографию. Когда Вы закончите, просто отправьте это сообщение. Бот же отправит '
                          f'то, как этот вопрос будет выглядеть у человека, проходящего этот {data["test_or_not"]}. Если'
-                         f' все устраивает, просто отправляйте следующий вопрос, если же нет, то напишите "удалить '
-                         f'вопрос" и  добавьте заново. Когда Вы закончите добавлять вопросы, напишите "завершить '
-                         f'добавление вопросов".')
+                         f' все устраивает, просто отправляйте следующий вопрос, если же нет, то можете '
+                         f'выбрать соответствующую кнопку на клавиатуре ниже, чтобы удалить вопрос. Когда Вы закончите'
+                         f' добавлять вопросы, нажмите на той же клавиатуре снизу "завершить добавление вопросов".',
+                         reply_markup=keyboard)
     print(await state.get_data(), await state.get_state())
 
 
 @dp.message(TestCreating.questions)
 async def question_add(message: Message, state: FSMContext):
+    reply_keyboard = [[KeyboardButton(text='/admin'), KeyboardButton(text='/start_test')],
+                      [KeyboardButton(text='/help')]]
+    keyboard = ReplyKeyboardMarkup(keyboard=reply_keyboard, resize_keyboard=True, one_time_keyboard=True)
     questions = (await state.get_data())['questions'] if 'questions' in await state.get_data() else []
-    if message.text == 'удалить вопрос':
-        await state.update_data(questions=questions[:-1])
-        await message.answer('Крайний вопрос был удален.')
-    elif message.text == 'завершить добавление вопросов':
+    if message.text == 'Удалить вопрос':
+        if not questions:
+            await message.answer('Вы еще не добавили вопросов.')
+        else:
+            await state.update_data(questions=questions[:-1])
+            await message.answer('Крайний вопрос был удален.')
+        print(await state.get_data(), await state.get_state())
+    elif message.text == 'Завершить добавление вопросов':
         current_data = await state.get_data()
         await state.clear()
-        await message.answer('Создание теста завершено, вопросы сохранены.')
-        print(current_state)
+        if current_data['questions']:
+            await message.answer('Создание теста завершено, вопросы сохранены.', reply_markup=keyboard)
+            create_test(current_data)
+        else:
+            await message.answer('Создание теста отменено.', reply_markup=keyboard)
     else:
         file_id = str(message.photo[-1]).split()[0].split("'")[1] if message.photo else ''
         text = message.text if message.text else message.caption if message.caption else ''
         test_or_not = (await state.get_data())['test_or_not']
-        question_text, variants = text.split('^^')[0], text.split('^^')[1].split(';') if len(text.split('^^')) > 1 else ''
+        question_text, variants = text.split('^^')[0], text.split('^^')[1].split(';') if len(
+            text.split('^^')) > 1 else []
         correct_variants = text.split('^^')[2].split(';') \
-            if test_or_not == 'тест' and len(text.split('^^')) == 3 else ''
-        if len(text.split('^^')) < 3 and test_or_not == 'тест':
+            if test_or_not == 'тест' and len(text.split('^^')) == 3 else []
+        if len(correct_variants) == 1 and (not correct_variants[0]) and test_or_not == 'тест':
             await message.answer('В режиме создания теста необходимо указать правильный вариант ответа.')
-        elif not text:
+        elif not question_text:
             await message.answer('Пожалуйста, напишите текст вопроса.')
+        elif len(variants) == 1 and variants[0] != '--':
+            await message.answer('Пожалуйста, укажите больше одного варианта ответа.')
         elif file_id:
             if len(variants) > 1:
                 await message.answer_photo(photo=file_id, caption=question_text,
