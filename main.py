@@ -7,6 +7,8 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
 from pyexpat.errors import messages
+from sqlalchemy.util import await_fallback
+
 from ORM import *
 import random
 
@@ -20,6 +22,14 @@ class TestCreating(StatesGroup):
     name = State()
     password = State()
     questions = State()
+
+
+class TestPassing(StatesGroup):
+    test_id_check = State()
+    name = State()
+    tasks = State()
+    multi_answer = State()
+    finish = State()
 
 
 async def main():
@@ -208,18 +218,183 @@ async def question_add(message: Message, state: FSMContext):
         print(await state.get_data(), await state.get_state())
 
 @dp.message(Command('start_test'))
-async def start_test_command(message: Message):
+async def start_test_command(message: Message, state: FSMContext):
     inline_keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text='Вернуться назад', callback_data='cancel_test_start')]
     ])
+    await state.clear()
+    await state.set_state(TestPassing.test_id_check)
     await message.answer('Чтобы начать проходить тест, введите его ID.', reply_markup=inline_keyboard)
+    print(await state.get_data(), await state.get_state())
+
+
+@dp.message(TestPassing.test_id_check)
+async def test_id_check(message: Message, state:  FSMContext):
+    inline_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text='Вернуться назад', callback_data='cancel_test_start')]
+    ])
+    if not check_test_id(int(message.text) if message.text.isdigit() else 000000):
+        await message.answer('Теста с таким ID не существует. Пожалуйста, проверьте корректность введенных данных.',
+                             reply_markup=inline_keyboard)
+    else:
+        await state.set_state(TestPassing.name)
+        await state.update_data(test_id=int(message.text))
+        await message.answer('Введите имя, которое будет отображаться при проверке результатов тестирования.',
+                             reply_markup=ReplyKeyboardRemove())
+    print(await state.get_data(), await state.get_state())
+
+
+@dp.message(TestPassing.name)
+async def name_entering(message: Message, state:  FSMContext):
+    inline_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text='Да', callback_data='lets_start'),
+         InlineKeyboardButton(text='Вернуться назад', callback_data='cancel_test_start')]
+    ])
+    test_id = (await state.get_data())['test_id']
+    data = get_test_information(test_id)
+    if message.text:
+        await state.update_data(name=message.text, questions=list(enumerate(get_questions(test_id), start=1)))
+        await state.set_state(TestPassing.tasks)
+        await message.answer(f'{message.text}, Вам предлагается пройти {"тест" if data[0] else "опрос"} "{data[1]}".'
+                             f'\nВы готовы начать?', reply_markup=inline_keyboard)
+    else:
+        await message.answer('Пожалуйста, введите имя одним текстовым сообщением.')
+    print(await state.get_data(), await state.get_state())
+
+
+@dp.callback_query(TestPassing.tasks)
+async def lets_start(callback: CallbackQuery, state: FSMContext):
+    answers = (await state.get_data())['answers'] if 'answers' in (await state.get_data()) else []
+    dop_text = ''
+    if len((await state.get_data())['questions']) == 0:
+        test_or_not = get_test_information((await state.get_data())["test_id"])[0]
+        dop_text = 'Перейти к результатам' if test_or_not else 'Вернуться назад'
+        inline_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=dop_text, callback_data='lets_finish')]
+        ])
+        await callback.message.answer(f'Вы завершили прохождние {"тест" if test_or_not else "опрос"}а.',
+                                      reply_markup=inline_keyboard)
+        await state.set_state(TestPassing.finish)
+    else:
+        index, quest = (await state.get_data())['questions'].pop(0)
+        if len(quest['cor_var']) > 1 and quest['variants'][0] != '-':
+            await state.update_data(no_answer_for_multi_answer=len(quest['cor_var']))
+            dop_text = f' (В этом вопросе {len(quest["cor_var"])} ответа(ов))'
+            await state.set_state(TestPassing.multi_answer)
+        if quest['file_id']:
+            if len(quest['variants']) > 1:
+                await callback.message.answer_photo(photo=quest['file_id'], caption=f"{index}) {quest['question']}"
+                                                                                    f"{dop_text}",
+                                                    reply_markup=await inline_keyboard_create(quest['variants']))
+            else:
+                await callback.message.answer_photo(photo=quest['file_id'], caption=f"{index}) {quest['question']}"
+                                                                                    f"{dop_text}")
+        else:
+            if len(quest['variants']) > 1:
+                await callback.message.answer(f"{index}) {quest['question']}{dop_text}",
+                                              reply_markup=await inline_keyboard_create(quest['variants']))
+            else:
+                await callback.message.answer(f"{index}) {quest['question']}{dop_text}")
+    if ('no_answer_for_multi_answer' in (await state.get_data()) and
+            (await state.get_data())['no_answer_for_multi_answer'] == -10):
+        await state.update_data(answers=answers[:-1] + [answers[-1] + [callback.data]], no_answer_for_multi_answer=0)
+    elif await state.get_state() == TestPassing.multi_answer:
+        await state.update_data(answers=answers + [[callback.data]] + [[]])
+    else:
+        await state.update_data(answers=answers + [[callback.data]])
+    print(await state.get_data(), await state.get_state())
+
+
+@dp.callback_query(TestPassing.multi_answer)
+async def multi_answer(callback: CallbackQuery, state: FSMContext):
+    answers = (await state.get_data())['answers']
+    nafma = (await state.get_data())['no_answer_for_multi_answer'] - 1
+    await state.update_data(answers=answers[:-1] + [answers[-1] + [callback.data]], no_answer_for_multi_answer=nafma)
+    if nafma == 1:
+        await state.set_state(TestPassing.tasks)
+        await state.update_data(no_answer_for_multi_answer=-10)
+    print(await state.get_data(), await state.get_state())
+
+
+@dp.message(TestPassing.tasks)
+async def lets_start_with_text(message: Message, state:  FSMContext):
+    answers = (await state.get_data())['answers'] if 'answers' in (await state.get_data()) else []
+    dop_text = ''
+    if len((await state.get_data())['questions']) == 0:
+        test_or_not = get_test_information((await state.get_data())["test_id"])[0]
+        dop_text = 'Перейти к результатам' if test_or_not else 'Вернуться назад'
+        inline_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=dop_text, callback_data='lets_finish')]
+        ])
+        await callback.message.answer(f'Вы завершили прохождние {"тест" if test_or_not else "опрос"}а.',
+                                      reply_markup=inline_keyboard)
+        await state.set_state(TestPassing.finish)
+    else:
+        index, quest = (await state.get_data())['questions'].pop(0)
+        if len(quest['cor_var']) > 1 and quest['variants'][0] != '-':
+            await state.update_data(no_answer_for_multi_answer=len(quest['cor_var']))
+            dop_text = f' (В этом вопросе {len(quest["cor_var"])} ответа(ов))'
+            await state.set_state(TestPassing.multi_answer)
+        if quest['file_id']:
+            if len(quest['variants']) > 1:
+                await message.answer_photo(photo=quest['file_id'], caption=f"{index}) {quest['question']}{dop_text}",
+                                           reply_markup=await inline_keyboard_create(quest['variants']))
+            else:
+                await message.answer_photo(photo=quest['file_id'], caption=f"{index}) {quest['question']}{dop_text}")
+        else:
+            if len(quest['variants']) > 1:
+                await message.answer(f"{index}) {quest['question']}{dop_text}",
+                                     reply_markup=await inline_keyboard_create(quest['variants']))
+            else:
+                await message.answer(f"{index}) {quest['question']}{dop_text}")
+    if ('no_answer_for_multi_answer' in (await state.get_data()) and
+            (await state.get_data())['no_answer_for_multi_answer'] == -10):
+        await state.update_data(answers=answers[:-1] + [answers[-1] + [message.text]], no_answer_for_multi_answer=0)
+    elif await state.get_state() == TestPassing.multi_answer:
+        await state.update_data(answers=answers + [[message.text]] + [[]])
+    else:
+        await state.update_data(answers=answers + [[message.text]])
+    print(await state.get_data(), await state.get_state())
+
+
+@dp.callback_query(F.data == 'lets_finish', TestPassing.finish)
+async def lets_finish(callback: CallbackQuery, state: FSMContext):
+    answers = (await state.get_data())['answers'][1:]
+    test_id = (await state.get_data())["test_id"]
+    test_or_not = get_test_information(test_id)[0]
+    await state.update_data(answers=answers)
+    current_state = await state.get_data()
+    await state.clear()
+    if not test_or_not:
+        reply_keyboard = [[KeyboardButton(text='/admin'), KeyboardButton(text='/start_test')],
+                          [KeyboardButton(text='/help')]]
+        keyboard = ReplyKeyboardMarkup(keyboard=reply_keyboard, resize_keyboard=True, one_time_keyboard=False)
+        await callback.message.answer('Выберите действие на клавиатуре ниже.', reply_markup=keyboard)
+        copy_result(current_state)
+    else:
+        inline_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text='Вернуться назад', callback_data='cancel_test_start')]
+        ])
+        cor_answers = list(map(lambda x: x['cor_var'], get_questions(test_id)))
+        msg = "Ваш ответ      ->      Правильный ответ\n"
+        cor_ans_count = 0
+        for i in range(len(cor_answers)):
+            ans = ";".join(answers[i])
+            cor_ans = ";".join(cor_answers[i])
+            if ans == cor_ans:
+                cor_ans_count += 1
+            msg += f'{ans}      ->      {cor_ans}\n'
+        msg += f"Количество правильных ответов: {cor_ans_count}/{len(answers)}"
+        await callback.message.answer(msg, reply_markup=inline_keyboard)
+        copy_result(current_state, cor_ans_count)
 
 
 @dp.callback_query(F.data == 'cancel_test_start')
-async def cancel_test_start(callback: CallbackQuery):
+async def cancel_test_start(callback: CallbackQuery, state: FSMContext):
     reply_keyboard = [[KeyboardButton(text='/admin'), KeyboardButton(text='/start_test')],
                       [KeyboardButton(text='/help')]]
     keyboard = ReplyKeyboardMarkup(keyboard=reply_keyboard, resize_keyboard=True, one_time_keyboard=False)
+    await state.clear()
     await callback.message.answer('Выберите действие на клавиатуре ниже.', reply_markup=keyboard)
 
 

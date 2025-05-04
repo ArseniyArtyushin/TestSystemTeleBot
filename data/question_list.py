@@ -15,4 +15,3 @@ class QuestionList(SqlAlchemyBase):
     correct_variants = sqlalchemy.Column(sqlalchemy.String, nullable=False)
 
     test = orm.relationship('TestList')
-
