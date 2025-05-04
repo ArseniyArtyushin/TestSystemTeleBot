@@ -72,7 +72,8 @@ async def help_command(message: Message):
 async def admin_command(message: Message):
     inline_keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text='Создать тест/опрос', callback_data='create_test'),
-         InlineKeyboardButton(text='Посмотреть результаты', callback_data='check_res')]
+         InlineKeyboardButton(text='Посмотреть результаты', callback_data='check_res')],
+        [InlineKeyboardButton(text='Вернуться назад', callback_data='cancel_test_start')]
     ])
     await message.answer('Выберите, что Вы хотите сделать.', reply_markup=inline_keyboard)
 
@@ -205,6 +206,21 @@ async def question_add(message: Message, state: FSMContext):
                                                             'question': question_text, 'variants': variants,
                                                             'correct_variants': correct_variants}])
         print(await state.get_data(), await state.get_state())
+
+@dp.message(Command('start_test'))
+async def start_test_command(message: Message):
+    inline_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text='Вернуться назад', callback_data='cancel_test_start')]
+    ])
+    await message.answer('Чтобы начать проходить тест, введите его ID.', reply_markup=inline_keyboard)
+
+
+@dp.callback_query(F.data == 'cancel_test_start')
+async def cancel_test_start(callback: CallbackQuery):
+    reply_keyboard = [[KeyboardButton(text='/admin'), KeyboardButton(text='/start_test')],
+                      [KeyboardButton(text='/help')]]
+    keyboard = ReplyKeyboardMarkup(keyboard=reply_keyboard, resize_keyboard=True, one_time_keyboard=False)
+    await callback.message.answer('Выберите действие на клавиатуре ниже.', reply_markup=keyboard)
 
 
 if __name__ == '__main__':
