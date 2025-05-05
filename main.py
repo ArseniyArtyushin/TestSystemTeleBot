@@ -1,5 +1,6 @@
 import asyncio
 from aiogram import Bot, Dispatcher, types, F
+from aiogram.enums import ParseMode
 from aiogram.types import ReplyKeyboardRemove, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, \
     InlineKeyboardButton, CallbackQuery, Message
 from aiogram.filters import Command
@@ -32,6 +33,12 @@ class TestPassing(StatesGroup):
     finish = State()
 
 
+class ResultCheck(StatesGroup):
+    test_id_check = State()
+    password_check = State()
+    res_ch = State()
+
+
 async def main():
     bot = Bot(token=BOT_TOKEN)
     await dp.start_polling(bot)
@@ -44,16 +51,23 @@ async def inline_keyboard_create(variants):
     return keyboard.adjust(2).as_markup()
 
 
+base_reply_keyboard = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text='/admin'), KeyboardButton(text='/start_test')],
+                                                    [KeyboardButton(text='/help')]],
+                                          resize_keyboard=True, one_time_keyboard=True)
+
+
+base_inline_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+    [InlineKeyboardButton(text='Вернуться назад', callback_data='cancel_test_start')]
+])
+
+
 @dp.message(Command('start'))
 async def start_command(message: Message):
-    reply_keyboard = [[KeyboardButton(text='/admin'), KeyboardButton(text='/start_test')],
-                      [KeyboardButton(text='/help')]]
-    keyboard = ReplyKeyboardMarkup(keyboard=reply_keyboard, resize_keyboard=True, one_time_keyboard=True)
     await message.reply(
         "Здравствуйте! Я бот для тестов/опросов. Вы можете открыть панель администратора, чтобы создать тест или "
         "посмотреть его результаты, либо же пройти тест, если с Вами уже поделились его ID. Если остались вопросы, "
         "то можете воспользоваться меню помощи, нажав на соответствующую кнопку на клавиатуре ниже.",
-        reply_markup=keyboard)
+        reply_markup=base_reply_keyboard)
 
 
 @dp.message(Command('help'))
@@ -79,12 +93,13 @@ async def help_command(message: Message):
 
 
 @dp.message(Command('admin'))
-async def admin_command(message: Message):
+async def admin_command(message: Message, state: FSMContext):
     inline_keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text='Создать тест/опрос', callback_data='create_test'),
          InlineKeyboardButton(text='Посмотреть результаты', callback_data='check_res')],
         [InlineKeyboardButton(text='Вернуться назад', callback_data='cancel_test_start')]
     ])
+    await state.clear()
     await message.answer('Выберите, что Вы хотите сделать.', reply_markup=inline_keyboard)
 
 
@@ -161,9 +176,6 @@ async def password_creating(message: Message, state: FSMContext):
 
 @dp.message(TestCreating.questions)
 async def question_add(message: Message, state: FSMContext):
-    reply_keyboard = [[KeyboardButton(text='/admin'), KeyboardButton(text='/start_test')],
-                      [KeyboardButton(text='/help')]]
-    keyboard = ReplyKeyboardMarkup(keyboard=reply_keyboard, resize_keyboard=True, one_time_keyboard=True)
     questions = (await state.get_data())['questions'] if 'questions' in await state.get_data() else []
     if message.text == 'Удалить вопрос':
         if not questions:
@@ -177,10 +189,10 @@ async def question_add(message: Message, state: FSMContext):
         await state.clear()
         if questions:
             await message.answer(f'Создание {current_data["test_or_not"]}а завершено, вопросы сохранены.',
-                                 reply_markup=keyboard)
+                                 reply_markup=base_reply_keyboard)
             create_test(current_data)
         else:
-            await message.answer(f'Создание {current_data["test_or_not"]}а отменено.', reply_markup=keyboard)
+            await message.answer(f'Создание {current_data["test_or_not"]}а отменено.', reply_markup=base_reply_keyboard)
     else:
         file_id = str(message.photo[-1]).split()[0].split("'")[1] if message.photo else ''
         text = message.text if message.text else message.caption if message.caption else ''
@@ -219,23 +231,17 @@ async def question_add(message: Message, state: FSMContext):
 
 @dp.message(Command('start_test'))
 async def start_test_command(message: Message, state: FSMContext):
-    inline_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text='Вернуться назад', callback_data='cancel_test_start')]
-    ])
     await state.clear()
     await state.set_state(TestPassing.test_id_check)
-    await message.answer('Чтобы начать проходить тест, введите его ID.', reply_markup=inline_keyboard)
+    await message.answer('Чтобы начать проходить тест, введите его ID.', reply_markup=base_inline_keyboard)
     print(await state.get_data(), await state.get_state())
 
 
 @dp.message(TestPassing.test_id_check)
 async def test_id_check(message: Message, state:  FSMContext):
-    inline_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text='Вернуться назад', callback_data='cancel_test_start')]
-    ])
     if not check_test_id(int(message.text) if message.text.isdigit() else 000000):
         await message.answer('Теста с таким ID не существует. Пожалуйста, проверьте корректность введенных данных.',
-                             reply_markup=inline_keyboard)
+                             reply_markup=base_inline_keyboard)
     else:
         await state.set_state(TestPassing.name)
         await state.update_data(test_id=int(message.text))
@@ -252,17 +258,21 @@ async def name_entering(message: Message, state:  FSMContext):
     ])
     test_id = (await state.get_data())['test_id']
     data = get_test_information(test_id)
-    if message.text:
+    already_exist_data = get_results(test_id)
+    already_exist_names = list(map(lambda x: x['name'], already_exist_data))
+    if not message.text:
+        await message.answer('Пожалуйста, введите имя одним текстовым сообщением.')
+    elif message.text in already_exist_names:
+        await message.answer('Введенное имя уже было использовано. Пожалуйста, введите другое имя')
+    else:
         await state.update_data(name=message.text, questions=list(enumerate(get_questions(test_id), start=1)))
         await state.set_state(TestPassing.tasks)
         await message.answer(f'{message.text}, Вам предлагается пройти {"тест" if data[0] else "опрос"} "{data[1]}".'
                              f'\nВы готовы начать?', reply_markup=inline_keyboard)
-    else:
-        await message.answer('Пожалуйста, введите имя одним текстовым сообщением.')
     print(await state.get_data(), await state.get_state())
 
 
-@dp.callback_query(TestPassing.tasks)
+@dp.callback_query(F.data != 'cancel_test_start', TestPassing.tasks)
 async def lets_start(callback: CallbackQuery, state: FSMContext):
     answers = (await state.get_data())['answers'] if 'answers' in (await state.get_data()) else []
     dop_text = ''
@@ -279,7 +289,7 @@ async def lets_start(callback: CallbackQuery, state: FSMContext):
         index, quest = (await state.get_data())['questions'].pop(0)
         if len(quest['cor_var']) > 1 and quest['variants'][0] != '-':
             await state.update_data(no_answer_for_multi_answer=len(quest['cor_var']))
-            dop_text = f' (В этом вопросе {len(quest["cor_var"])} ответа(ов))'
+            dop_text = f' (В этом вопросе больше одного ответа)'
             await state.set_state(TestPassing.multi_answer)
         if quest['file_id']:
             if len(quest['variants']) > 1:
@@ -326,8 +336,8 @@ async def lets_start_with_text(message: Message, state:  FSMContext):
         inline_keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text=dop_text, callback_data='lets_finish')]
         ])
-        await callback.message.answer(f'Вы завершили прохождние {"тест" if test_or_not else "опрос"}а.',
-                                      reply_markup=inline_keyboard)
+        await message.answer(f'Вы завершили прохождние {"тест" if test_or_not else "опрос"}а.',
+                             reply_markup=inline_keyboard)
         await state.set_state(TestPassing.finish)
     else:
         index, quest = (await state.get_data())['questions'].pop(0)
@@ -366,36 +376,97 @@ async def lets_finish(callback: CallbackQuery, state: FSMContext):
     current_state = await state.get_data()
     await state.clear()
     if not test_or_not:
-        reply_keyboard = [[KeyboardButton(text='/admin'), KeyboardButton(text='/start_test')],
-                          [KeyboardButton(text='/help')]]
-        keyboard = ReplyKeyboardMarkup(keyboard=reply_keyboard, resize_keyboard=True, one_time_keyboard=False)
-        await callback.message.answer('Выберите действие на клавиатуре ниже.', reply_markup=keyboard)
+        await callback.message.answer('Выберите действие на клавиатуре ниже.', reply_markup=base_reply_keyboard)
         copy_result(current_state)
     else:
-        inline_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text='Вернуться назад', callback_data='cancel_test_start')]
-        ])
         cor_answers = list(map(lambda x: x['cor_var'], get_questions(test_id)))
-        msg = "Ваш ответ      ->      Правильный ответ\n"
+        msg = (f"`Ваш ответ{' ' * ((max(map(len, answers)) if max(map(len, answers)) > 15 else 15) - 9)}->"
+               f"{' ' * ((max(map(len, cor_answers)) if max(map(len, cor_answers)) > 22 else 22) - 16)}"
+               f"Правильный ответ\n\n")
         cor_ans_count = 0
         for i in range(len(cor_answers)):
             ans = ";".join(answers[i])
             cor_ans = ";".join(cor_answers[i])
             if ans == cor_ans:
                 cor_ans_count += 1
-            msg += f'{ans}      ->      {cor_ans}\n'
-        msg += f"Количество правильных ответов: {cor_ans_count}/{len(answers)}"
-        await callback.message.answer(msg, reply_markup=inline_keyboard)
+            msg += (f'{ans}{" " * ((max(map(len, answers)) if max(map(len, answers)) > 15 else 15) - len(ans))}->'
+                    f'{" " * ((max(map(len, cor_answers)) if max(map(len, cor_answers)) > 22 else 22) - len(cor_ans))}'
+                    f'{cor_ans}\n')
+        msg += f"\nКоличество правильных ответов: {cor_ans_count}/{len(answers)}`"
+        await callback.message.answer(msg, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=base_inline_keyboard)
         copy_result(current_state, cor_ans_count)
+
+
+@dp.callback_query(F.data == 'check_res')
+async def check_res(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await state.set_state(ResultCheck.test_id_check)
+    await callback.message.answer('Введите ID теста, результаты которого Вы хотите посмотреть.',
+                                  reply_markup=base_inline_keyboard)
+    print(await state.get_data(), await state.get_state())
+
+
+@dp.message(ResultCheck.test_id_check)
+async def res_test_id_check(message: Message, state:  FSMContext):
+    if not check_test_id(int(message.text) if message.text.isdigit() else 000000):
+        await message.answer('Теста с таким ID не существует. Пожалуйста, проверьте корректность введенных данных.',
+                             reply_markup=base_inline_keyboard)
+    else:
+        await state.set_state(ResultCheck.password_check)
+        await state.update_data(test_id=int(message.text))
+        await message.answer('Для доступа к результатам, введите пароль от теста.', reply_markup=base_inline_keyboard)
+    print(await state.get_data(), await state.get_state())
+
+
+@dp.message(ResultCheck.password_check)
+async def res_password_check(message: Message, state:  FSMContext):
+    test_id = (await state.get_data())['test_id']
+    data = get_test_information(test_id)
+    if not message.text:
+        await message.answer('Пожалуйста, отправьте пароль одним текстовым сообщением.')
+    elif data[2] != message.text:
+        await message.answer('Пароль некорректен. Проверьте правильность введенных данных.',
+                             reply_markup=base_inline_keyboard)
+    else:
+        res_data = get_results(test_id)
+        names_list = list(map(lambda x: x['name'], res_data))
+        await state.set_state(ResultCheck.res_ch)
+        await message.answer('Список пользователей, прошедших тестирование:',
+                             reply_markup=await inline_keyboard_create(names_list))
+    print(await state.get_data(), await state.get_state())
+
+
+@dp.callback_query(ResultCheck.res_ch)
+async def res_ch(callback: CallbackQuery, state: FSMContext):
+    if callback.data == 'cancel_test_start':
+        await state.clear()
+        await callback.message.answer('Выберите действие на клавиатуре ниже.', reply_markup=base_reply_keyboard)
+    else:
+        test_id = (await state.get_data())['test_id']
+        res_data = get_results(test_id)
+        results = list(filter(lambda x: x['name'] == callback.data, res_data))
+        answ = results[0]['answers'] if results else []
+        if results:
+            msg = f"`Результаты тестируемого {callback.data}:\n"
+            for i in range(len(answ)):
+                msg += f"{i + 1}) {';'.join(answ[i])}\n"
+        if results[0]['cor_ans_count']:
+            msg += f"Количество правильных ответов: {results[0]['cor_ans_count']}/{len(answ)}`"
+        else:
+            msg += '`'
+        await callback.message.answer(msg, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=base_inline_keyboard)
 
 
 @dp.callback_query(F.data == 'cancel_test_start')
 async def cancel_test_start(callback: CallbackQuery, state: FSMContext):
-    reply_keyboard = [[KeyboardButton(text='/admin'), KeyboardButton(text='/start_test')],
-                      [KeyboardButton(text='/help')]]
-    keyboard = ReplyKeyboardMarkup(keyboard=reply_keyboard, resize_keyboard=True, one_time_keyboard=False)
     await state.clear()
-    await callback.message.answer('Выберите действие на клавиатуре ниже.', reply_markup=keyboard)
+    await callback.message.answer('Выберите действие на клавиатуре ниже.', reply_markup=base_reply_keyboard)
+
+
+@dp.callback_query(F.data == 'cancel_test_start', TestPassing.tasks)
+async def cancel_test_start1(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await callback.message.answer('Выберите действие на клавиатуре ниже.', reply_markup=base_reply_keyboard)
 
 
 if __name__ == '__main__':

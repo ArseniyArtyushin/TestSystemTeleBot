@@ -54,8 +54,17 @@ def copy_result(data, cac=''):
     res = ResultList()
     res.test_id = data['test_id']
     res.name = data['name']
-    res.answers = "^^".join(list(map(lambda x: ";".join(x), data['answers'])))
+    res.answers = "^^^^^^".join(list(map(lambda x: ";".join(x), data['answers'])))
     if cac:
         res.correct_count = cac
     db_sess.add(res)
     db_sess.commit()
+
+
+def get_results(ident):
+    db_sess = db_session.create_session()
+    data = db_sess.query(ResultList).filter(ResultList.test_id == ident)
+    data_converted = list(map(lambda x: {'name': x.name,
+                                         'answers': list(map(lambda y: y.split(';'), x.answers.split('^^^^^^'))),
+                                         'cor_ans_count': x.correct_count}, data))
+    return data_converted
