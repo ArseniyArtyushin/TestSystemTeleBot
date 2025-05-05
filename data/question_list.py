@@ -4,7 +4,7 @@ from data.db_session import SqlAlchemyBase
 from sqlalchemy import orm
 
 
-class QuestionList(SqlAlchemyBase):
+class QuestionList(SqlAlchemyBase):  # Класс таблицы вопросов
     __tablename__ = 'questions'
 
     test_id = sqlalchemy.Column(sqlalchemy.Integer, sqlalchemy.ForeignKey("test_list.test_id"))

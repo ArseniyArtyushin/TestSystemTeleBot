@@ -4,12 +4,13 @@ from data.question_list import QuestionList
 from data.result_list import ResultList
 import os
 
+# Создание файла БД, если вдруг отсутствует
 if not os.path.exists('db/'):
     os.mkdir('./db')
-db_session.global_init("db/main.db")
+db_session.global_init("db/main.db")  # Подключение к БД
 
 
-def create_test(data):
+def create_test(data):  # Функция добавления теста
     db_sess = db_session.create_session()
     test = TestList()
     test.test_id = data['ID']
@@ -28,20 +29,20 @@ def create_test(data):
     db_sess.commit()
 
 
-def check_test_id(ID):
+def check_test_id(ID):  # Функция проверки существования такого ID
     db_sess = db_session.create_session()
     tests = db_sess.query(TestList).all()
     test_ids = list(map(lambda x: x.test_id, tests))
     return ID in test_ids
 
 
-def get_test_information(ident):
+def get_test_information(ident):  # Функция получения информации теста
     db_sess = db_session.create_session()
     data = db_sess.query(TestList).filter(TestList.test_id == ident)
     return data[0].test_or_not, data[0].name, data[0].hashed_password
 
 
-def get_questions(ident):
+def get_questions(ident):  # Функция получения вопросов теста
     db_sess = db_session.create_session()
     data = db_sess.query(QuestionList).filter(QuestionList.test_id == ident)
     data_converted =list(map(lambda x: {'file_id': x.file_id, 'question': x.question, 'variants': x.variants.split(';'),
@@ -49,7 +50,7 @@ def get_questions(ident):
     return data_converted
 
 
-def copy_result(data, cac=''):
+def copy_result(data, cac=''):  # Функция сохранения результатов теста
     db_sess = db_session.create_session()
     res = ResultList()
     res.test_id = data['test_id']
@@ -61,7 +62,7 @@ def copy_result(data, cac=''):
     db_sess.commit()
 
 
-def get_results(ident):
+def get_results(ident):  # Функция выдачи результатов
     db_sess = db_session.create_session()
     data = db_sess.query(ResultList).filter(ResultList.test_id == ident)
     data_converted = list(map(lambda x: {'name': x.name,

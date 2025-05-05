@@ -3,7 +3,7 @@ from data.db_session import SqlAlchemyBase
 from sqlalchemy import orm
 
 
-class TestList(SqlAlchemyBase):
+class TestList(SqlAlchemyBase):  # Класс таблицы тестов
     __tablename__ = 'test_list'
 
     test_id = sqlalchemy.Column(sqlalchemy.Integer, primary_key=True)
